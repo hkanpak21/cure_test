@@ -2,6 +2,7 @@ package he
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/tuneinsight/lattigo/v6/core/rlwe"
 	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
@@ -199,6 +200,196 @@ func MulMatricesCiphertexts(
 			
 			resultCiphertexts[i][j] = resultCt
 		}
+	}
+
+	return resultCiphertexts, nil
+}
+
+// MulMatricesCiphertextsParallel performs homomorphic matrix multiplication of two ciphertext matrices in parallel.
+// The input matrices are represented as slices of ciphertexts, where each ciphertext in ctaRows
+// represents a row of matrix A, and each ciphertext in ctbCols represents a column of matrix B.
+// The result is a matrix C where each element C[i][j] is the dot product of row i from A and column j from B.
+// This function uses multiple worker goroutines to process rows in parallel.
+//
+// Parameters:
+//   - ctaRows: A slice of *rlwe.Ciphertext, where each ciphertext encrypts a row of matrix A.
+//     If A is m x k, len(ctaRows) is m.
+//   - ctbCols: A slice of *rlwe.Ciphertext, where each ciphertext encrypts a column of matrix B.
+//     If B is k x n, len(ctbCols) is n.
+//   - k_dimension: The common dimension (number of columns in A / number of rows in B).
+//     This is the number of elements in each row/column vector that are multiplied and summed.
+//     It must be <= params.MaxSlots().
+//   - evaluator: The *ckks.Evaluator to perform the operations.
+//     It MUST be initialized with appropriate rotation keys for the inner sum operations.
+//   - numWorkers: The number of parallel workers to use. If <= 0, it will default to 1.
+//
+// Returns:
+//   - [][]*rlwe.Ciphertext: A 2D slice representing the encrypted result matrix C (m x n).
+//   - error: An error if any operation fails or inputs are invalid.
+func MulMatricesCiphertextsParallel(
+	ctaRows []*rlwe.Ciphertext,
+	ctbCols []*rlwe.Ciphertext,
+	k_dimension int,
+	evaluator *ckks.Evaluator,
+	numWorkers int,
+) ([][]*rlwe.Ciphertext, error) {
+	if evaluator == nil {
+		return nil, fmt.Errorf("MulMatricesCiphertextsParallel: evaluator cannot be nil")
+	}
+
+	if ctaRows == nil || ctbCols == nil {
+		return nil, fmt.Errorf("MulMatricesCiphertextsParallel: input matrices cannot be nil")
+	}
+
+	if len(ctaRows) == 0 || len(ctbCols) == 0 {
+		return nil, fmt.Errorf("MulMatricesCiphertextsParallel: input matrices cannot be empty")
+	}
+
+	if k_dimension <= 0 {
+		return nil, fmt.Errorf("MulMatricesCiphertextsParallel: k_dimension must be positive")
+	}
+
+	if numWorkers <= 0 {
+		return nil, fmt.Errorf("MulMatricesCiphertextsParallel: numWorkers must be positive")
+	}
+
+	// Get the dimensions of the result matrix
+	m := len(ctaRows)    // Number of rows in A
+	n := len(ctbCols)    // Number of columns in B
+	// k_dimension is the shared dimension
+
+	// Initialize the result matrix
+	resultCiphertexts := make([][]*rlwe.Ciphertext, m)
+	for i := 0; i < m; i++ {
+		resultCiphertexts[i] = make([]*rlwe.Ciphertext, n)
+	}
+
+	// Create worker-specific evaluators with the same parameters and keys
+	workerEvaluators := make([]*ckks.Evaluator, numWorkers)
+	for w := 0; w < numWorkers; w++ {
+		// Clone the evaluator for thread safety
+		workerEvaluators[w] = evaluator.ShallowCopy()
+	}
+
+	// Create a wait group to synchronize goroutines
+	var wg sync.WaitGroup
+
+	// Create a mutex for synchronizing error handling
+	errMutex := &sync.Mutex{}
+	var firstErr error
+
+	// Calculate how many rows each worker should process
+	rowsPerWorker := m / numWorkers
+	if rowsPerWorker == 0 {
+		rowsPerWorker = 1
+		numWorkers = m // Adjust number of workers if we have fewer rows than workers
+	}
+
+	// Start worker goroutines
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			// Get this worker's evaluator
+			workerEval := workerEvaluators[workerID]
+
+			// Calculate the range of rows this worker will process
+			startRow := workerID * rowsPerWorker
+			endRow := (workerID + 1) * rowsPerWorker
+			if workerID == numWorkers-1 {
+				endRow = m // Last worker takes any remaining rows
+			}
+
+			// Process assigned rows
+			for i := startRow; i < endRow; i++ {
+				// Check if an error has already occurred
+				errMutex.Lock()
+				if firstErr != nil {
+					errMutex.Unlock()
+					return
+				}
+				errMutex.Unlock()
+
+				// Process each column for this row
+				for j := 0; j < n; j++ {
+					// Step 1: Multiply the row vector from A with the column vector from B element-wise
+					mulCt, err := workerEval.MulNew(ctaRows[i], ctbCols[j])
+					if err != nil {
+						errMutex.Lock()
+						if firstErr == nil {
+							firstErr = fmt.Errorf("parallel multiplication failed for C[%d][%d]: %w", i, j, err)
+						}
+						errMutex.Unlock()
+						return
+					}
+
+					// Step 2: Relinearize the product ciphertext
+					if err = workerEval.Relinearize(mulCt, mulCt); err != nil {
+						errMutex.Lock()
+						if firstErr == nil {
+							firstErr = fmt.Errorf("parallel relinearization failed for C[%d][%d]: %w", i, j, err)
+						}
+						errMutex.Unlock()
+						return
+					}
+
+					// Step 3: Rescale to manage the noise and scale
+					if err = workerEval.Rescale(mulCt, mulCt); err != nil {
+						errMutex.Lock()
+						if firstErr == nil {
+							firstErr = fmt.Errorf("parallel rescale failed for C[%d][%d]: %w", i, j, err)
+						}
+						errMutex.Unlock()
+						return
+					}
+
+					// Step 4: Compute the sum using the divide-and-conquer approach with powers of 2 rotations
+					resultCt := mulCt.CopyNew()
+					tempCt := mulCt.CopyNew()
+
+					// Calculate log2(k_dimension)
+					logK := 0
+					for k := k_dimension; k > 1; k >>= 1 {
+						logK++
+					}
+
+					// Use rotations with powers of 2
+					for rotStep := 0; rotStep < logK; rotStep++ {
+						rotation := 1 << rotStep
+						if err = workerEval.Rotate(resultCt, rotation, tempCt); err != nil {
+							errMutex.Lock()
+							if firstErr == nil {
+								firstErr = fmt.Errorf("parallel rotation failed for C[%d][%d], rotation %d: %w", i, j, rotation, err)
+							}
+							errMutex.Unlock()
+							return
+						}
+
+						// Add the rotated ciphertext to the result
+						if err = workerEval.Add(resultCt, tempCt, resultCt); err != nil {
+							errMutex.Lock()
+							if firstErr == nil {
+								firstErr = fmt.Errorf("parallel addition failed for C[%d][%d], rotation %d: %w", i, j, rotation, err)
+							}
+							errMutex.Unlock()
+							return
+						}
+					}
+
+					// Store the result
+					resultCiphertexts[i][j] = resultCt
+				}
+			}
+		}(w)
+	}
+
+	// Wait for all workers to finish
+	wg.Wait()
+
+	// Check if any errors occurred
+	if firstErr != nil {
+		return nil, firstErr
 	}
 
 	return resultCiphertexts, nil
