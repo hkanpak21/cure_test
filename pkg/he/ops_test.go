@@ -379,7 +379,7 @@ func TestMulMatricesCiphertexts(t *testing.T) {
 func TestMatrixPowerCiphertexts(t *testing.T) {
 	// This test calculates the fourth power of a matrix (A^4) using homomorphic operations
 	// without decrypting in between multiplications
-	
+
 	// 1. Setup HE context
 	params, err := GetCKKSParameters(DefaultSet)
 	if err != nil {
@@ -399,14 +399,14 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 	// Generate rotation keys for all indices needed for the inner sum
 	// We'll generate keys for powers of 2, which is sufficient for the rotation-based inner sum
 	logDim := 3 // log2(8) = 3, supporting dimensions up to 8
-	
+
 	// Generate keys for powers of 2: 1, 2, 4
 	for i := 0; i <= logDim; i++ {
 		rot := 1 << i
 		galEl := params.GaloisElement(rot)
 		rotKey := kgen.GenGaloisKeyNew(galEl, sk)
 		evKSwitcher.GaloisKeys[galEl] = rotKey
-		
+
 		// Also generate keys for the corresponding negative rotations
 		negRot := params.N() - rot
 		galElNeg := params.GaloisElement(negRot)
@@ -486,7 +486,7 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 	// 6. For the second multiplication, we'll re-encrypt A^2 instead of trying to reformat it
 	// This is simpler and avoids issues with rotation keys
 	t.Logf("Decrypting A^2 for re-encryption...")
-	
+
 	// Decrypt A^2 to get plaintext values
 	plaintextA2 := make([][]float64, n)
 	for i := range plaintextA2 {
@@ -503,7 +503,7 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 			plaintextA2[i][j] = resultValues[0]
 		}
 	}
-	
+
 	// Re-encrypt A^2 rows and columns for the next multiplication
 	ctA2Rows := make([]*rlwe.Ciphertext, n)
 	for i := 0; i < n; i++ {
@@ -645,7 +645,7 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 
 func TestParallelMatrixMultiplication(t *testing.T) {
 	// This test compares the performance and correctness of sequential vs parallel matrix multiplication
-	
+
 	// 1. Setup HE context
 	params, err := GetCKKSParameters(DefaultSet)
 	if err != nil {
@@ -665,14 +665,14 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 	// Generate rotation keys for all indices needed for the inner sum
 	// We'll generate keys for powers of 2, which is sufficient for the rotation-based inner sum
 	logDim := 4 // log2(16) = 4, supporting dimensions up to 16
-	
+
 	// Generate keys for powers of 2: 1, 2, 4, 8, 16
 	for i := 0; i <= logDim; i++ {
 		rot := 1 << i
 		galEl := params.GaloisElement(rot)
 		rotKey := kgen.GenGaloisKeyNew(galEl, sk)
 		evKSwitcher.GaloisKeys[galEl] = rotKey
-		
+
 		// Also generate keys for the corresponding negative rotations
 		negRot := params.N() - rot
 		galElNeg := params.GaloisElement(negRot)
@@ -784,16 +784,16 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 	for i, workers := range workerCounts {
 		// For each test, create separate evaluators for each worker
 		t.Logf("Performing parallel homomorphic matrix multiplication with %d workers...", workers)
-		
+
 		// Create worker-specific evaluators with the same keys
 		workerEvaluators := make([]*ckks.Evaluator, workers)
 		for w := 0; w < workers; w++ {
 			// Create a new evaluator with the same parameters and keys
 			workerEvaluators[w] = NewEvaluator(params, evKSwitcher)
 		}
-		
+
 		parStart := time.Now()
-		
+
 		// Use a custom implementation for parallel matrix multiplication
 		// that doesn't rely on MulMatricesCiphertextsParallel
 		m := len(ctaRows)
@@ -802,35 +802,35 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 		for i := 0; i < m; i++ {
 			resultCiphertexts[i] = make([]*rlwe.Ciphertext, n)
 		}
-		
+
 		// Divide rows among workers
 		rowsPerWorker := m / workers
 		if rowsPerWorker == 0 {
 			rowsPerWorker = 1
 			workers = m // Adjust number of workers if we have fewer rows than workers
 		}
-		
+
 		// Use a wait group to synchronize goroutines
 		var wg sync.WaitGroup
 		var firstErr error
 		errMutex := &sync.Mutex{}
-		
+
 		// Start worker goroutines
 		for w := 0; w < workers; w++ {
 			wg.Add(1)
 			go func(workerID int) {
 				defer wg.Done()
-				
+
 				// Get this worker's evaluator
 				workerEval := workerEvaluators[workerID]
-				
+
 				// Calculate the range of rows this worker will process
 				startRow := workerID * rowsPerWorker
 				endRow := (workerID + 1) * rowsPerWorker
 				if workerID == workers-1 {
 					endRow = m // Last worker takes any remaining rows
 				}
-				
+
 				// Process assigned rows
 				for i := startRow; i < endRow; i++ {
 					// Check if an error has already occurred
@@ -840,7 +840,7 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 						break
 					}
 					errMutex.Unlock()
-					
+
 					// Process each column for this row
 					for j := 0; j < n; j++ {
 						// Step 1: Multiply the row vector from A with the column vector from B element-wise
@@ -853,7 +853,7 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 							errMutex.Unlock()
 							break
 						}
-						
+
 						// Step 2: Relinearize the product ciphertext
 						if err = workerEval.Relinearize(mulCt, mulCt); err != nil {
 							errMutex.Lock()
@@ -863,7 +863,7 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 							errMutex.Unlock()
 							break
 						}
-						
+
 						// Step 3: Rescale to manage the noise and scale
 						if err = workerEval.Rescale(mulCt, mulCt); err != nil {
 							errMutex.Lock()
@@ -873,17 +873,17 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 							errMutex.Unlock()
 							break
 						}
-						
+
 						// Step 4: Compute the sum using the divide-and-conquer approach with powers of 2 rotations
 						resultCt := mulCt.CopyNew()
 						tempCt := mulCt.CopyNew()
-						
+
 						// Calculate log2(k_dimension)
 						logK := 0
 						for k := k; k > 1; k >>= 1 {
 							logK++
 						}
-						
+
 						// Use rotations with powers of 2
 						for rotStep := 0; rotStep < logK; rotStep++ {
 							rotation := 1 << rotStep
@@ -895,7 +895,7 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 								errMutex.Unlock()
 								break
 							}
-							
+
 							// Add the rotated ciphertext to the result
 							if err = workerEval.Add(resultCt, tempCt, resultCt); err != nil {
 								errMutex.Lock()
@@ -906,32 +906,32 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 								break
 							}
 						}
-						
+
 						// Store the result
 						resultCiphertexts[i][j] = resultCt
 					}
 				}
 			}(w)
 		}
-		
+
 		// Wait for all workers to finish
 		wg.Wait()
-		
+
 		// Check if any errors occurred
 		if firstErr != nil {
 			t.Fatalf("Parallel matrix multiplication with %d workers failed: %v", workers, firstErr)
 		}
-		
+
 		parElapsed[i] = time.Since(parStart)
 		parResults[i] = resultCiphertexts
-		
+
 		t.Logf("Parallel matrix multiplication with %d workers completed in %v", workers, parElapsed[i])
 		t.Logf("Speedup with %d workers: %.2fx", workers, float64(seqElapsed)/float64(parElapsed[i]))
 	}
 
 	// 8. Decrypt and verify results
 	t.Logf("Verifying results...")
-	
+
 	// Decrypt sequential result
 	actualSeqC := make([][]float64, m)
 	for i := range actualSeqC {
@@ -1054,7 +1054,7 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 	t.Logf("\nPerformance Summary:")
 	t.Logf("Sequential execution time: %v", seqElapsed)
 	for i, workers := range workerCounts {
-		t.Logf("Parallel execution time (%d workers): %v (%.2fx speedup)", 
+		t.Logf("Parallel execution time (%d workers): %v (%.2fx speedup)",
 			workers, parElapsed[i], float64(seqElapsed)/float64(parElapsed[i]))
 	}
 }
@@ -1081,14 +1081,14 @@ func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 	// Generate rotation keys for all indices needed for the inner sum
 	// We'll generate keys for powers of 2, which is sufficient for the rotation-based inner sum
 	logDim := 3 // log2(8) = 3, supporting dimensions up to 8
-	
+
 	// Generate keys for powers of 2: 1, 2, 4
 	for i := 0; i <= logDim; i++ {
 		rot := 1 << i
 		galEl := params.GaloisElement(rot)
 		rotKey := kgen.GenGaloisKeyNew(galEl, sk)
 		evKSwitcher.GaloisKeys[galEl] = rotKey
-		
+
 		// Also generate keys for the corresponding negative rotations
 		negRot := params.N() - rot
 		galElNeg := params.GaloisElement(negRot)
@@ -1169,7 +1169,7 @@ func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 
 	// 6. Decrypt A^2 for re-encryption
 	t.Logf("Decrypting A^2 for re-encryption...")
-	
+
 	// Decrypt A^2 to get plaintext values
 	plaintextA2 := make([][]float64, n)
 	for i := range plaintextA2 {
@@ -1186,7 +1186,7 @@ func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 			plaintextA2[i][j] = resultValues[0]
 		}
 	}
-	
+
 	// Re-encrypt A^2 rows and columns for the next multiplication
 	ctA2Rows := make([]*rlwe.Ciphertext, n)
 	for i := 0; i < n; i++ {
@@ -1332,14 +1332,14 @@ func TestMulLargeMatricesCiphertexts(t *testing.T) {
 	// For large matrices, we need to generate keys in a more efficient way
 	// We'll generate keys for powers of 2, which is sufficient for the rotation-based inner sum
 	logDim := 6 // log2(64) = 6, supporting dimensions up to 64
-	
+
 	// Generate keys for powers of 2: 1, 2, 4, 8, 16, 32, 64, 128
 	for i := 0; i <= logDim; i++ {
 		rot := 1 << i
 		galEl := params.GaloisElement(rot)
 		rotKey := kgen.GenGaloisKeyNew(galEl, sk)
 		evKSwitcher.GaloisKeys[galEl] = rotKey
-		
+
 		// Also generate keys for the corresponding negative rotations
 		// This might be needed for some operations
 		negRot := params.N() - rot
