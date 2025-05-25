@@ -4,7 +4,7 @@ go 1.23.0
 
 require (
 	github.com/stretchr/testify v1.8.0
-	github.com/tuneinsight/lattigo/v5 v5.0.7
+	github.com/tuneinsight/lattigo/v6 v6.1.1
 )
 
 require (
