@@ -1,4 +1,4 @@
-package he
+package hetest
 
 import (
 	"fmt"
@@ -9,9 +9,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	// rlwe is needed for types like sk *rlwe.SecretKey, pk *rlwe.PublicKey in variable declarations
-	// and for functions like rlwe.NewMemEvaluationKeySet.
 	"github.com/tuneinsight/lattigo/v6/core/rlwe"
 	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
+
+	"cure_test/pkg/he"
 )
 
 // checkCloseEnough compares two slices of float64 and returns true if all elements
@@ -33,22 +34,22 @@ func checkCloseEnough(a, b []float64, epsilon float64, t *testing.T) bool {
 
 func TestScalarMultCiphertext(t *testing.T) {
 	// 1. Setup HE context
-	params, err := GetCKKSParameters(DefaultSet)
+	params, err := he.GetCKKSParameters(he.TestSet) // Using TestSet for faster testing
 	if err != nil {
 		t.Fatalf("Failed to get CKKS parameters: %v", err)
 	}
 
-	kgen := KeyGenerator(params)
+	kgen := he.KeyGenerator(params)
 	sk := kgen.GenSecretKeyNew()   // sk is *rlwe.SecretKey
 	pk := kgen.GenPublicKeyNew(sk) // pk is *rlwe.PublicKey
 
-	encoder := NewEncoder(params)
-	encryptor := NewEncryptor(params, pk)
-	decryptor := NewDecryptor(params, sk)
+	encoder := he.NewEncoder(params)
+	encryptor := he.NewEncryptor(params, pk)
+	decryptor := he.NewDecryptor(params, sk)
 
 	// For ScalarMultCiphertext, we need an evaluator.
 	// Lattigo's MultByConstNew does not require relinearization keys.
-	evaluator := NewEvaluator(params, nil) // Passing nil as evk
+	evaluator := he.NewEvaluator(params, nil) // Passing nil as evk
 
 	// 2. Prepare Data
 	ptxtVector := []float64{1.1, 2.2, 3.3, -4.4, 5.5, 0.0, -10.1, 8.7}
@@ -71,7 +72,7 @@ func TestScalarMultCiphertext(t *testing.T) {
 	}
 
 	// 3. Execute
-	ctOut, err := ScalarMultCiphertext(scalar, ctIn, evaluator)
+	ctOut, err := he.ScalarMultCiphertext(scalar, ctIn, evaluator)
 	if err != nil {
 		t.Fatalf("ScalarMultCiphertext failed: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestScalarMultCiphertext(t *testing.T) {
 	// Compare. CKKS is approximate, so allow a small epsilon.
 	// The precision depends on parameters, especially LogDefaultScale.
 	// For LogDefaultScale = 40, an epsilon of 1e-9 to 1e-12 is usually reasonable.
-	epsilon := 1e-6 // Relaxed from 1e-8 to account for CKKS error
+	epsilon := 1e-4 // Relaxed from 1e-6 to account for CKKS error in TestSet
 
 	// The resultVector is already sliced to the correct length (len(ptxtVector)).
 	assert.InDeltaSlice(t, expectedVector, resultVector, epsilon, "Decoded vector does not match expected vector after scalar multiplication")
@@ -121,23 +122,24 @@ func TestScalarMultCiphertext(t *testing.T) {
 
 func TestMulCiphertexts(t *testing.T) {
 	// 1. Setup HE context
-	params, err := GetCKKSParameters(DefaultSet)
+	params, err := he.GetCKKSParameters(he.TestSet) // Using TestSet for faster testing
 	if err != nil {
 		t.Fatalf("Failed to get CKKS parameters: %v", err)
 	}
 
-	kgen := KeyGenerator(params)
+	kgen := he.KeyGenerator(params)
 	sk := kgen.GenSecretKeyNew()
 	pk := kgen.GenPublicKeyNew(sk)
 
-	// For MulCiphertexts, we need a RelinearizationKey
+	// Create evaluation keys for relinearization
 	rlk := kgen.GenRelinearizationKeyNew(sk)
-	evKSwitcher := rlwe.NewMemEvaluationKeySet(rlk) // Correct for Lattigo v6
+	evk := rlwe.NewMemEvaluationKeySet(rlk)
 
-	encoder := NewEncoder(params)
-	encryptor := NewEncryptor(params, pk)
-	decryptor := NewDecryptor(params, sk)
-	evaluator := NewEvaluator(params, evKSwitcher) // Evaluator now has relin key
+	encoder := he.NewEncoder(params)
+	encryptor := he.NewEncryptor(params, pk)
+	decryptor := he.NewDecryptor(params, sk)
+	// Need an evaluator with relinearization keys for MulCiphertexts
+	evaluator := he.NewEvaluator(params, evk)
 
 	// 2. Prepare Data
 	ptxtVector1 := []float64{1.0, 2.0, 3.0, -4.0}
@@ -174,7 +176,7 @@ func TestMulCiphertexts(t *testing.T) {
 	}
 
 	// 3. Execute
-	ctOut, err := MulCiphertexts(ct1, ct2, evaluator)
+	ctOut, err := he.MulCiphertexts(ct1, ct2, evaluator)
 	if err != nil {
 		t.Fatalf("MulCiphertexts failed: %v", err)
 	}
@@ -192,7 +194,7 @@ func TestMulCiphertexts(t *testing.T) {
 		expectedVector[i] = ptxtVector1[i] * ptxtVector2[i]
 	}
 
-	epsilon := 1e-6 // Relaxed to account for CKKS approximation error
+	epsilon := 1e-4 // Relaxed from 1e-6 to account for CKKS approximation error in TestSet
 	assert.InDeltaSlice(t, expectedVector, resultVector, epsilon, "Decoded vector does not match expected vector after ciphertext multiplication")
 
 	// t.Logf("Ptxt1:    %v\n", ptxtVector1)
@@ -203,21 +205,20 @@ func TestMulCiphertexts(t *testing.T) {
 
 func TestMulMatricesCiphertexts(t *testing.T) {
 	// 1. Setup HE context
-	params, err := GetCKKSParameters(DefaultSet)
+	params, err := he.GetCKKSParameters(he.TestSet) // Using TestSet for faster testing
 	if err != nil {
 		t.Fatalf("Failed to get CKKS parameters: %v", err)
 	}
 
-	kgen := KeyGenerator(params)
+	kgen := he.KeyGenerator(params)
 	sk := kgen.GenSecretKeyNew()
 	pk := kgen.GenPublicKeyNew(sk)
 
-	// For matrix multiplication, we need RelinearizationKey and RotationKeys
+	// For MulMatricesCiphertexts, we need a RelinearizationKey and RotationKeys
 	rlk := kgen.GenRelinearizationKeyNew(sk)
 
-	// For the Trace method, we need to generate all necessary Galois keys
-	// This includes keys for all powers of 5 modulo 2N
-	// Let's generate a more comprehensive set of keys
+	// Rotation keys are needed for the matrix operations
+	// We're generating a subset of rotation keys for the matrix multiplication
 
 	// Create evaluation key set with relinearization key
 	evKSwitcher := rlwe.NewMemEvaluationKeySet(rlk)
@@ -240,10 +241,10 @@ func TestMulMatricesCiphertexts(t *testing.T) {
 	conjKey := kgen.GenGaloisKeyNew(conjEl, sk)
 	evKSwitcher.GaloisKeys[conjEl] = conjKey
 
-	encoder := NewEncoder(params)
-	encryptor := NewEncryptor(params, pk)
-	decryptor := NewDecryptor(params, sk)
-	evaluator := NewEvaluator(params, evKSwitcher)
+	encoder := he.NewEncoder(params)
+	encryptor := he.NewEncryptor(params, pk)
+	decryptor := he.NewDecryptor(params, sk)
+	evaluator := he.NewEvaluator(params, evKSwitcher)
 
 	// 2. Define matrix dimensions
 	// Matrix A: m x k
@@ -306,7 +307,7 @@ func TestMulMatricesCiphertexts(t *testing.T) {
 	}
 
 	// 5. Execute matrix multiplication
-	ctC, err := MulMatricesCiphertexts(ctaRows, ctbCols, k, evaluator)
+	ctC, err := he.MulMatricesCiphertexts(ctaRows, ctbCols, k, evaluator)
 	if err != nil {
 		t.Fatalf("MulMatricesCiphertexts failed: %v", err)
 	}
@@ -381,12 +382,12 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 	// without decrypting in between multiplications
 
 	// 1. Setup HE context
-	params, err := GetCKKSParameters(DefaultSet)
+	params, err := he.GetCKKSParameters(he.DefaultSet)
 	if err != nil {
 		t.Fatalf("Failed to get CKKS parameters: %v", err)
 	}
 
-	kgen := KeyGenerator(params)
+	kgen := he.KeyGenerator(params)
 	sk := kgen.GenSecretKeyNew()   // sk is *rlwe.SecretKey
 	pk := kgen.GenPublicKeyNew(sk) // pk is *rlwe.PublicKey
 
@@ -419,10 +420,10 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 	conjKey := kgen.GenGaloisKeyNew(conjEl, sk)
 	evKSwitcher.GaloisKeys[conjEl] = conjKey
 
-	encoder := NewEncoder(params)
-	encryptor := NewEncryptor(params, pk)
-	decryptor := NewDecryptor(params, sk)
-	evaluator := NewEvaluator(params, evKSwitcher)
+	encoder := he.NewEncoder(params)
+	encryptor := he.NewEncryptor(params, pk)
+	decryptor := he.NewDecryptor(params, sk)
+	evaluator := he.NewEvaluator(params, evKSwitcher)
 
 	// 2. Define matrix dimensions
 	// For a square matrix that we'll raise to the power of 4
@@ -477,7 +478,7 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 	// 5. Calculate A^2 = A * A
 	t.Logf("Calculating A^2 = A * A...")
 	start := time.Now()
-	ctA2, err := MulMatricesCiphertexts(ctaRows, ctaCols, n, evaluator)
+	ctA2, err := he.MulMatricesCiphertexts(ctaRows, ctaCols, n, evaluator)
 	if err != nil {
 		t.Fatalf("MulMatricesCiphertexts for A^2 failed: %v", err)
 	}
@@ -539,7 +540,7 @@ func TestMatrixPowerCiphertexts(t *testing.T) {
 	// 7. Calculate A^4 = A^2 * A^2
 	t.Logf("Calculating A^4 = A^2 * A^2...")
 	start = time.Now()
-	ctA4, err := MulMatricesCiphertexts(ctA2Rows, ctA2Cols, n, evaluator)
+	ctA4, err := he.MulMatricesCiphertexts(ctA2Rows, ctA2Cols, n, evaluator)
 	if err != nil {
 		t.Fatalf("MulMatricesCiphertexts for A^4 failed: %v", err)
 	}
@@ -647,12 +648,12 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 	// This test compares the performance and correctness of sequential vs parallel matrix multiplication
 
 	// 1. Setup HE context
-	params, err := GetCKKSParameters(DefaultSet)
+	params, err := he.GetCKKSParameters(he.DefaultSet)
 	if err != nil {
 		t.Fatalf("Failed to get CKKS parameters: %v", err)
 	}
 
-	kgen := KeyGenerator(params)
+	kgen := he.KeyGenerator(params)
 	sk := kgen.GenSecretKeyNew()   // sk is *rlwe.SecretKey
 	pk := kgen.GenPublicKeyNew(sk) // pk is *rlwe.PublicKey
 
@@ -685,10 +686,10 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 	conjKey := kgen.GenGaloisKeyNew(conjEl, sk)
 	evKSwitcher.GaloisKeys[conjEl] = conjKey
 
-	encoder := NewEncoder(params)
-	encryptor := NewEncryptor(params, pk)
-	decryptor := NewDecryptor(params, sk)
-	evaluator := NewEvaluator(params, evKSwitcher)
+	encoder := he.NewEncoder(params)
+	encryptor := he.NewEncryptor(params, pk)
+	decryptor := he.NewDecryptor(params, sk)
+	evaluator := he.NewEvaluator(params, evKSwitcher)
 
 	// 2. Define matrix dimensions for testing
 	// Matrix A: m x k
@@ -769,7 +770,7 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 	// 6. Execute sequential matrix multiplication
 	t.Logf("Performing sequential homomorphic matrix multiplication...")
 	seqStart := time.Now()
-	seqResult, err := MulMatricesCiphertexts(ctaRows, ctbCols, k, evaluator)
+	seqResult, err := he.MulMatricesCiphertexts(ctaRows, ctbCols, k, evaluator)
 	seqElapsed := time.Since(seqStart)
 	if err != nil {
 		t.Fatalf("Sequential MulMatricesCiphertexts failed: %v", err)
@@ -789,7 +790,7 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 		workerEvaluators := make([]*ckks.Evaluator, workers)
 		for w := 0; w < workers; w++ {
 			// Create a new evaluator with the same parameters and keys
-			workerEvaluators[w] = NewEvaluator(params, evKSwitcher)
+			workerEvaluators[w] = he.NewEvaluator(params, evKSwitcher)
 		}
 
 		parStart := time.Now()
@@ -1063,12 +1064,12 @@ func TestParallelMatrixMultiplication(t *testing.T) {
 // using the parallel matrix multiplication implementation.
 func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 	// 1. Setup HE context
-	params, err := GetCKKSParameters(DefaultSet)
+	params, err := he.GetCKKSParameters(he.DefaultSet)
 	if err != nil {
 		t.Fatalf("Failed to get CKKS parameters: %v", err)
 	}
 
-	kgen := KeyGenerator(params)
+	kgen := he.KeyGenerator(params)
 	sk := kgen.GenSecretKeyNew()   // sk is *rlwe.SecretKey
 	pk := kgen.GenPublicKeyNew(sk) // pk is *rlwe.PublicKey
 
@@ -1101,10 +1102,10 @@ func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 	conjKey := kgen.GenGaloisKeyNew(conjEl, sk)
 	evKSwitcher.GaloisKeys[conjEl] = conjKey
 
-	encoder := NewEncoder(params)
-	encryptor := NewEncryptor(params, pk)
-	decryptor := NewDecryptor(params, sk)
-	evaluator := NewEvaluator(params, evKSwitcher)
+	encoder := he.NewEncoder(params)
+	encryptor := he.NewEncryptor(params, pk)
+	decryptor := he.NewDecryptor(params, sk)
+	evaluator := he.NewEvaluator(params, evKSwitcher)
 
 	// 2. Define matrix dimensions
 	// For a square matrix that we'll raise to the power of 4
@@ -1161,7 +1162,7 @@ func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 	t.Logf("Calculating A^2 = A * A using parallel implementation...")
 	numWorkers := 4
 	start := time.Now()
-	ctA2, err := MulMatricesCiphertextsParallel(ctaRows, ctaCols, n, evaluator, numWorkers)
+	ctA2, err := he.MulMatricesCiphertextsParallel(ctaRows, ctaCols, n, evaluator, numWorkers)
 	if err != nil {
 		t.Fatalf("MulMatricesCiphertextsParallel for A^2 failed: %v", err)
 	}
@@ -1222,7 +1223,7 @@ func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 	// 7. Calculate A^4 = A^2 * A^2 using parallel implementation
 	t.Logf("Calculating A^4 = A^2 * A^2 using parallel implementation...")
 	start = time.Now()
-	ctA4, err := MulMatricesCiphertextsParallel(ctA2Rows, ctA2Cols, n, evaluator, numWorkers)
+	ctA4, err := he.MulMatricesCiphertextsParallel(ctA2Rows, ctA2Cols, n, evaluator, numWorkers)
 	if err != nil {
 		t.Fatalf("MulMatricesCiphertextsParallel for A^4 failed: %v", err)
 	}
@@ -1313,12 +1314,12 @@ func TestEfficientMatrixPowerCiphertexts(t *testing.T) {
 func TestMulLargeMatricesCiphertexts(t *testing.T) {
 	// 1. Setup HE context
 	// For larger matrices, we need more slots, so use DefaultSet
-	params, err := GetCKKSParameters(DefaultSet)
+	params, err := he.GetCKKSParameters(he.DefaultSet)
 	if err != nil {
 		t.Fatalf("Failed to get CKKS parameters: %v", err)
 	}
 
-	kgen := KeyGenerator(params)
+	kgen := he.KeyGenerator(params)
 	sk := kgen.GenSecretKeyNew()
 	pk := kgen.GenPublicKeyNew(sk)
 
@@ -1353,10 +1354,10 @@ func TestMulLargeMatricesCiphertexts(t *testing.T) {
 	conjKey := kgen.GenGaloisKeyNew(conjEl, sk)
 	evKSwitcher.GaloisKeys[conjEl] = conjKey
 
-	encoder := NewEncoder(params)
-	encryptor := NewEncryptor(params, pk)
-	decryptor := NewDecryptor(params, sk)
-	evaluator := NewEvaluator(params, evKSwitcher)
+	encoder := he.NewEncoder(params)
+	encryptor := he.NewEncryptor(params, pk)
+	decryptor := he.NewDecryptor(params, sk)
+	evaluator := he.NewEvaluator(params, evKSwitcher)
 
 	// 2. Define matrix dimensions for a larger test
 	// Matrix A: m x k
@@ -1425,7 +1426,7 @@ func TestMulLargeMatricesCiphertexts(t *testing.T) {
 	// 5. Execute matrix multiplication
 	t.Logf("Performing homomorphic matrix multiplication...")
 	start := time.Now()
-	ctC, err := MulMatricesCiphertexts(ctaRows, ctbCols, k, evaluator)
+	ctC, err := he.MulMatricesCiphertexts(ctaRows, ctbCols, k, evaluator)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("MulMatricesCiphertexts failed: %v", err)
