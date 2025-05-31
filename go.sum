@@ -19,8 +19,6 @@ github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSS
 github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.8.0 h1:pSgiaMZlXftHpm5L7V1+rVB+AZJydKsMxsQBIJw4PKk=
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
-github.com/tuneinsight/lattigo/v5 v5.0.7 h1:iu6GK4O7S3HpD8ijzR7tLrXp8Ux8iIkLz2kXA+JmfMM=
-github.com/tuneinsight/lattigo/v5 v5.0.7/go.mod h1:FMne1WTfuhoWlI5ossCftvmZrhil6Uzx+7pVRuevvqE=
 github.com/tuneinsight/lattigo/v6 v6.1.1 h1:rtaH+elXr3gCwmZVMSTVLDoWBpNMHolKfH9C2byIwOY=
 github.com/tuneinsight/lattigo/v6 v6.1.1/go.mod h1:LYG2azfYxo18j6PW6B6sjpjCkVK+3leUT0jRXMII8gA=
 golang.org/x/crypto v0.18.0 h1:PGVlW0xEltQnzFZ55hkuX5+KLyrMYhHld1YHO4AKcdc=

@@ -30,9 +30,9 @@ func GetCKKSParameters(paramSetID ParameterSetIdentifier) (params ckks.Parameter
 		// Default general-purpose parameter set for testing
 		params, err = ckks.NewParametersFromLiteral(ckks.ParametersLiteral{
 			LogN:         14,                      // Ring degree: 2^14 = 16384
-			LogQ:         []int{55, 40, 40, 40, 40, 40}, // Modulus chain for ciphertext operations
+			LogQ:         []int{55, 40, 40, 45, 45, 45}, // Increased last 3 primes for better depth // Modulus chain for ciphertext operations
 			LogP:         []int{60, 60},          // Special modulus for key switching
-			LogDefaultScale: 40,                 // Default scale for encoding: 2^40
+			LogDefaultScale: 50,                 // Default scale for encoding: 2^50
 		})
 		if err != nil {
 			return params, fmt.Errorf("failed to create default parameters: %w", err)
@@ -40,9 +40,10 @@ func GetCKKSParameters(paramSetID ParameterSetIdentifier) (params ckks.Parameter
 
 	case TestSet:
 		// Faster parameter set for testing with log n = 12
+		// Adding more levels to support higher-degree polynomials (degree 7 requires 9 levels)
 		params, err = ckks.NewParametersFromLiteral(ckks.ParametersLiteral{
 			LogN:         12,                      // Ring degree: 2^12 = 4096 (smaller for faster testing)
-			LogQ:         []int{40, 30, 30, 30},  // Reduced modulus chain for faster operations
+			LogQ:         []int{40, 30, 30, 30, 30, 30, 30, 30, 30, 30},  // 10 levels for polynomials up to degree 7
 			LogP:         []int{45, 45},          // Special modulus for key switching
 			LogDefaultScale: 30,                 // Default scale for encoding: 2^30
 		})
